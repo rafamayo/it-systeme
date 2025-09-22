@@ -61,6 +61,7 @@ d:                  ; Result
 
 ## 3. Assembling
 
+```python
 from simple_assembler import SimpleAssembler
 
 asm_program = """
@@ -89,6 +90,7 @@ machine_code, listing = assembler.assemble_with_listing(asm_program)
 print("Machine code:", machine_code)
 print("\nAssembly listing:\n")
 print(listing)
+```
 
 ---
 
