@@ -104,6 +104,7 @@ print(listing)
 
 ### Listing
 
+```text
 00: 0x23 ; Load the value at address x into register A
 01: 0x0F
 02: 0x24 ; Load the value at address y into register B
@@ -122,3 +123,4 @@ print(listing)
 0F: 0x0A ; First number
 10: 0x03 ; Second number
 11: 0x00 ; Result
+```
