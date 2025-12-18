@@ -3,9 +3,8 @@
 ## 1. Arithmetic and Logic
 
 ### **1.1. Absolute Difference**
-
-**Goal:** Compute the absolute difference between two memory bytes `x` and `y` and store the result in `d`.
-**Concepts:** Subtraction, branching (sign test), complement logic, conditional jump (`JS`).
++ **Goal:** Compute the absolute difference between two memory bytes `x` and `y` and store the result in `d`.
++ **Concepts:** Subtraction, branching (sign test), complement logic, conditional jump (`JS`).
 
 ---
 
