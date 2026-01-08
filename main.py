@@ -1,43 +1,57 @@
-# Test the simple CPU emulator
+# Assemble and execute
+# "Usage: python.py <asm_file.asm>"
+
+import sys
 from simple_assembler import SimpleAssembler
 from simple_cpu_emulator import SimpleCPUEmulator
 
-asm_program = """
-    LDA x			; Load the value at address x into register A
-    LDB y			; Load the value at address y into register B
-    SUB B			; Perform the subtraction A = A - B
-    CMA				; Complement A
-    JS positiv		; Jump if sign flag is set (A>=B)
-    STA d			; Store the value in register A to address d
-    HLT				; Stop the program
-    positiv:
-    CMA				; Complement A
-    STA d			; Store the value in register A to address d
-    HLT				; Stop the program
-    x:				; First number
-    0x0A
-    y:				; Second number
-    0x03
-    d:				; Result
-    0x00
-"""
+def read_asm_file(filename):
+    """Reads an assembler file and returns its content, ignoring lines starting with #."""
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+    # Filter out comment lines and strip whitespace
+    asm_program = [line.strip() for line in lines if not line.strip().startswith('#')]
+    return '\n'.join(asm_program)
 
-print(asm_program)
+def main():
+    # check that a file name was provided!
+    if len(sys.argv) < 2:
+        print("Usage: python.py <asm_file.asm>")
+        sys.exit(1)
 
-assembler = SimpleAssembler()
-mc_program, mc_listing = assembler.assemble_with_listing(asm_program)
-print(mc_listing)
-print(mc_program)
+    asm_file = sys.argv[1]
 
-emulator = SimpleCPUEmulator()
+    # Read in the assembler file
+    try:
+        asm_program = read_asm_file(asm_file)
+    except FileNotFoundError:
+        print(f"Error: File '{asm_file}' not found.")
+        sys.exit(1)
 
-emulator.read_into_memory(mc_program)
 
-print(f"Initial state:")
-emulator.display_current_state()
+    print("Assembler program:")
+    print(asm_program)
 
-emulator.run()
+    assembler = SimpleAssembler()
+    mc_program, mc_listing = assembler.assemble_with_listing(asm_program)
+    
+    print("Machine code listing:")
+    print(mc_listing)
+    print("Machine code program:")
+    print(mc_program)
 
-print(f"Final state:")
-emulator.display_current_state()
-emulator.memory_dump()
+    emulator = SimpleCPUEmulator()
+
+    emulator.read_into_memory(mc_program)
+
+    print(f"Initial state:")
+    emulator.display_current_state()
+
+    emulator.run()
+
+    print(f"Final state:")
+    emulator.display_current_state()
+    emulator.memory_dump()
+
+if __name__ == "__main__":
+    main()
