@@ -56,6 +56,9 @@ class SimpleAssembler:
         "RET":   (0x31, 1, "none"),
         "NOP":   (0x3E, 1, "none"),
         "HLT":   (0x3F, 1, "none"),
+ 
+        "ORG": (None, 0, "imm"),  # Setzt die aktuelle Adresse (kein Machine Code)
+        "DB":  (None, 1, "imm"),  # Platziert Bytes ab der aktuellen Adresse
     }
 
     # Pretty-print ints as 0xHH when you print the list, while staying real ints.
@@ -98,102 +101,138 @@ class SimpleAssembler:
         return machine
 
     def assemble_with_listing(self, source):
-        """
-        Assemble and return (machine_bytes, listing_text).
-        - machine_bytes: List[int] (pretty-print as 0xHH if printed)
-        - listing_text:  A human-readable listing with addresses and comments
-        """
         lines = self._normalize_source(source)
 
         # First pass: compute addresses for labels; also classify lines
         labels = {}
         addr = 0
-        classified = []  # list of dicts with type: 'label'|'instr'|'data'
+        classified = []
+        max_addr = 0  # Track the maximum address used
+        current_org_addr = 0
+
         for entry in lines:
             code = entry["code"]
             if not code:
                 continue
+
+            if code.upper().startswith("ORG"):
+                operand = code[3:].strip()
+                try:
+                    org_addr = int(operand, 0)
+                except ValueError:
+                    raise ValueError(f"Invalid address for ORG: {operand!r}")
+                classified.append({**entry, "type": "org", "addr": org_addr})
+                current_org_addr = org_addr
+                max_addr = max(max_addr, org_addr)
+                continue
+
+            if code.upper().startswith("DB"):
+                operands = [op.strip() for op in code[2:].split(",")]
+                db_addr = current_org_addr + len(operands) - 1  # Letzte Adresse, die durch DB belegt wird
+                max_addr = max(max_addr, db_addr)
+                classified.append({**entry, "type": "db", "operands": operands})
+                continue
+
             if code.endswith(':'):
                 label_name = code[:-1].strip().upper()
                 labels[label_name] = addr
                 classified.append({**entry, "type": "label", "name": label_name})
-            else:
-                # instruction or data?
+                continue
+
+            try:
+                inst, operand = self._split_mnemonic(code)
+                _, length, _ = self.OPCODES[inst]
+                classified.append({**entry, "type": "instr", "inst": inst, "operand": operand})
+                addr += length
+                max_addr = max(max_addr, addr - 1)  # Aktualisiere max_addr auf die letzte verwendete Adresse
+            except ValueError:
                 try:
-                    inst, operand = self._split_mnemonic(code)
-                    _, length, _ = self.OPCODES[inst]
-                    classified.append({**entry, "type": "instr", "inst": inst, "operand": operand})
-                    addr += length
+                    int(code, 0)
                 except ValueError:
-                    # must be a data byte literal
-                    try:
-                        int(code, 0)
-                    except ValueError:
-                        raise ValueError(f"Line not instruction or data: {entry['raw']!r}")
-                    classified.append({**entry, "type": "data"})
-                    addr += 1
+                    raise ValueError(f"Line not instruction or data: {entry['raw']!r}")
+                classified.append({**entry, "type": "data"})
+                addr += 1
+                max_addr = max(max_addr, addr - 1)  # Aktualisiere max_addr auf die letzte verwendete Adresse
 
         # Second pass: emit bytes + build listing
-        machine = []
+        machine = [None] * (max_addr + 1)  # Initialize with enough space
         listing_lines = []
         addr = 0
-        pending_label_comment = None  # attach label's comment to the very next data byte if that data line has none
+        pending_label_comment = None
+        current_org_addr = 0
 
         for entry in classified:
             t = entry["type"]
+
+            if t == "org":
+                current_org_addr = entry["addr"]
+                addr = current_org_addr
+                continue
+
             if t == "label":
                 pending_label_comment = entry["comment"] or None
+                continue
+
+            if t == "db":
+                for val_str in entry["operands"]:
+                    val = int(val_str, 0)
+                    if not (0 <= val <= 0xFF):
+                        raise ValueError(f"Data byte out of range: {val_str!r}")
+                    machine[addr] = self._HexInt(val)
+                    comment = entry["comment"] or ""
+                    listing_lines.append(f"{addr:02X}: 0x{val:02X}" + (f" ; {comment}" if comment else ""))
+                    addr += 1
                 continue
 
             if t == "data":
                 val = int(entry["code"], 0)
                 if not (0 <= val <= 0xFF):
                     raise ValueError(f"Data byte out of range: {entry['raw']!r}")
-                machine.append(self._HexInt(val))
+                machine[addr] = self._HexInt(val)
                 comment = entry["comment"] or pending_label_comment or ""
                 listing_lines.append(f"{addr:02X}: 0x{val:02X}" + (f" ; {comment}" if comment else ""))
                 addr += 1
                 pending_label_comment = None
                 continue
 
-            # instruction
-            inst = entry["inst"]
-            operand_text = entry["operand"]
-            opcode, length, mode = self.OPCODES[inst]
+            if t == "instr":
+                inst = entry["inst"]
+                operand_text = entry["operand"]
+                opcode, length, mode = self.OPCODES[inst]
 
-            # Emit opcode byte (comment attached to the opcode line)
-            machine.append(self._HexInt(opcode))
-            comment = entry["comment"] or ""
-            listing_lines.append(f"{addr:02X}: 0x{opcode:02X}" + (f" ; {comment}" if comment else ""))
-            addr += 1
+                machine[addr] = self._HexInt(opcode)
+                comment = entry["comment"] or ""
+                listing_lines.append(f"{addr:02X}: 0x{opcode:02X}" + (f" ; {comment}" if comment else ""))
+                addr += 1
 
-            if length == 2:
-                if not operand_text:
-                    raise ValueError(f"Missing operand for '{inst}'")
+                if length == 2:
+                    if not operand_text:
+                        raise ValueError(f"Missing operand for '{inst}'")
 
-                if mode == "imm":
-                    try:
-                        val = int(operand_text, 0)
-                    except ValueError:
-                        raise ValueError(f"Immediate expected for '{inst}', got: {operand_text!r}")
-                else:  # addr mode
-                    if operand_text in labels:
-                        val = labels[operand_text]
-                    else:
+                    if mode == "imm":
                         try:
                             val = int(operand_text, 0)
                         except ValueError:
-                            raise ValueError(f"Label/address expected for '{inst}', got: {operand_text!r}")
+                            raise ValueError(f"Immediate expected for '{inst}', got: {operand_text!r}")
+                    else:  # addr mode
+                        if operand_text in labels:
+                            val = labels[operand_text]
+                        else:
+                            try:
+                                val = int(operand_text, 0)
+                            except ValueError:
+                                raise ValueError(f"Label/address expected for '{inst}', got: {operand_text!r}")
 
-                if not (0 <= val <= 0xFF):
-                    raise ValueError(f"Operand out of range for '{inst}': {operand_text!r}")
+                    if not (0 <= val <= 0xFF):
+                        raise ValueError(f"Operand out of range for '{inst}': {operand_text!r}")
 
-                machine.append(self._HexInt(val))
-                # Typically no comment on the operand byte line (to match your example)
-                listing_lines.append(f"{addr:02X}: 0x{val:02X}")
-                addr += 1
+                    machine[addr] = self._HexInt(val)
+                    listing_lines.append(f"{addr:02X}: 0x{val:02X}")
+                    addr += 1
 
-            # labels' pending comment does NOT apply to instructions; only to subsequent data
             pending_label_comment = None
+
+        # Filter out None values and replace them with 0x00
+        machine = [byte if byte is not None else 0x00 for byte in machine]
 
         return list(machine), "\n".join(listing_lines)
